@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"github.com/Dreamacro/clash/adapters/outbound"
 	C "github.com/Dreamacro/clash/constant"
+	"github.com/back20/proxypool/log"
 	"github.com/back20/proxypool/pkg/proxy"
 	"github.com/ivpusic/grpool"
-	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,8 +33,9 @@ func SpeedTestAll(proxies []proxy.Proxy, conns int) {
 		numJob = (numWorker + 2) / 4
 	}
 	resultCount := 0
+	m := sync.Mutex{}
 
-	log.Println("Speed Test ON")
+	log.Infoln("Speed Test ON")
 	doneCount := 0
 	// use grpool
 	pool := grpool.NewPool(numWorker, numJob)
@@ -45,6 +46,7 @@ func SpeedTestAll(proxies []proxy.Proxy, conns int) {
 			defer pool.JobDone()
 			speed, err := ProxySpeedTest(pp)
 			if err == nil || speed > 0 {
+				m.Lock()
 				if proxyStat, ok := ProxyStats.Find(pp); ok {
 					proxyStat.UpdatePSSpeed(speed)
 				} else {
@@ -54,6 +56,7 @@ func SpeedTestAll(proxies []proxy.Proxy, conns int) {
 					})
 				}
 				resultCount++
+				m.Unlock()
 			}
 			doneCount++
 			progress := float64(doneCount) * 100 / float64(len(proxies))
@@ -63,7 +66,7 @@ func SpeedTestAll(proxies []proxy.Proxy, conns int) {
 	pool.WaitAll()
 	pool.Release()
 	fmt.Println()
-	log.Println("Speed Test Done. Count all speed results:", resultCount)
+	log.Infoln("Speed Test Done. Count all speed results: %d", resultCount)
 }
 
 // SpeedTestNew tests speed of new proxies which is not in ProxyStats. Then appended to ProxyStats
@@ -80,8 +83,9 @@ func SpeedTestNew(proxies []proxy.Proxy, conns int) {
 		numJob = (numWorker + 2) / 4
 	}
 	resultCount := 0
+	m := sync.Mutex{}
 
-	log.Println("Speed Test ON")
+	log.Infoln("Speed Test ON")
 	doneCount := 0
 	// use grpool
 	pool := grpool.NewPool(numWorker, numJob)
@@ -90,8 +94,9 @@ func SpeedTestNew(proxies []proxy.Proxy, conns int) {
 		pp := p
 		pool.JobQueue <- func() {
 			defer pool.JobDone()
+			m.Lock()
 			if proxyStat, ok := ProxyStats.Find(pp); !ok {
-				// when ProxyStat not exits
+				// when proxy's Stat not exits
 				speed, err := ProxySpeedTest(pp)
 				if err == nil || speed > 0 {
 					ProxyStats = append(ProxyStats, Stat{
@@ -107,6 +112,7 @@ func SpeedTestNew(proxies []proxy.Proxy, conns int) {
 					resultCount++
 				}
 			}
+			m.Unlock()
 			doneCount++
 			progress := float64(doneCount) * 100 / float64(len(proxies))
 			fmt.Printf("\r\t[%5.1f%% DONE]", progress)
@@ -115,7 +121,7 @@ func SpeedTestNew(proxies []proxy.Proxy, conns int) {
 	pool.WaitAll()
 	pool.Release()
 	fmt.Println()
-	log.Println("Speed Test Done. New speed results count:", resultCount)
+	log.Infoln("Speed Test Done. New speed results count: %d", resultCount)
 }
 
 // ProxySpeedTest returns a speed result of a proxy. The speed result is like 20Mbit/s. -1 for error.
@@ -129,6 +135,9 @@ func ProxySpeedTest(p proxy.Proxy) (speedResult float64, err error) {
 	pmap["port"] = int(pmap["port"].(float64))
 	if p.TypeName() == "vmess" {
 		pmap["alterId"] = int(pmap["alterId"].(float64))
+		if network := pmap["network"].(string); network == "h2" {
+			return 0, nil // todo 暂无方法测试h2的延迟，clash对于h2的connection会阻塞。但暂时不丢弃
+		}
 	}
 
 	clashProxy, err := outbound.ParseProxy(pmap)
@@ -154,7 +163,7 @@ func ProxySpeedTest(p proxy.Proxy) (speedResult float64, err error) {
 
 	// some logically unexpected error handling
 	if user == nil {
-		return -1, errors.New("fetch User Info failed in go routine") // 我真的不会用channel抛出err，go routine的不明原因阻塞我服了。下面的两个BUG现在都不知道原因，逻辑上不该出现的
+		return -1, errors.New("fetch User Infoln failed in go routine") // 我真的不会用channel抛出err，go routine的不明原因阻塞我服了。下面的两个BUG现在都不知道原因，逻辑上不该出现的
 	}
 	if &serverList == nil {
 		return -1, errors.New("unexpected error when fetching serverlist: addr of var serverlist nil")

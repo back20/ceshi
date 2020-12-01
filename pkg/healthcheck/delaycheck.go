@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/back20/proxypool/pkg/proxy"
+	"sync"
 	"time"
 
 	"github.com/ivpusic/grpool"
@@ -19,6 +20,7 @@ func CleanBadProxiesWithGrpool(proxies []proxy.Proxy) (cproxies []proxy.Proxy) {
 
 	c := make(chan *Stat)
 	defer close(c)
+	m := sync.Mutex{}
 
 	pool.WaitCount(len(proxies))
 	// 线程：延迟测试，测试过程通过grpool的job并发
@@ -29,6 +31,7 @@ func CleanBadProxiesWithGrpool(proxies []proxy.Proxy) (cproxies []proxy.Proxy) {
 				defer pool.JobDone()
 				delay, err := testDelay(pp)
 				if err == nil {
+					m.Lock()
 					if ps, ok := ProxyStats.Find(p); ok {
 						ps.UpdatePSDelay(delay)
 						c <- ps
@@ -40,6 +43,7 @@ func CleanBadProxiesWithGrpool(proxies []proxy.Proxy) (cproxies []proxy.Proxy) {
 						ProxyStats = append(ProxyStats, *ps)
 						c <- ps
 					}
+					m.Unlock()
 				}
 			}
 		}
@@ -84,6 +88,9 @@ func testDelay(p proxy.Proxy) (delay uint16, err error) {
 	pmap["port"] = int(pmap["port"].(float64))
 	if p.TypeName() == "vmess" {
 		pmap["alterId"] = int(pmap["alterId"].(float64))
+		if network := pmap["network"].(string); network == "h2" {
+			return 10, nil // todo 暂无方法测试h2的延迟，clash对于h2的connection会阻塞。但暂时不丢弃
+		}
 	}
 
 	clashProxy, err := outbound.ParseProxy(pmap)
