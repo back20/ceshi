@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v2.3.4
 
       - name: Build and push Docker images
-        uses: docker/build-push-action@v2.2.0
+        uses: docker/build-push-action@v2.3.0
         with:
           username: back20
           password: ${{ secrets.GITHUB_TOKEN }}
